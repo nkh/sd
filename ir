@@ -1,0 +1,76 @@
+#!/bin/bash
+
+help=<<EOH
+NAME
+	ir - create a temporary file structure and run ranger 
+
+SYNOPSIS
+	ir [command]
+
+DESCRIPTION
+	ir runs a user defined command to generate a list of files. If no command
+	is given, ir runs 'fzf -m' in the current directory to select files.
+
+	ir createa temporary directory and create links to all the files given
+	by the user command.
+	
+	ranger is then run in that directory
+
+USER COMMAND
+	the user command is given as an argument, remember to quote the command
+	to avoid interpolation by the shell.
+
+	EG: ir 'find /home/directory/ -type f | fzf -m'
+
+	ir doesn't accept piping a file list as ranger is an interactive commands
+	which can't be run in a pipe. There are some possibilities to run ir in a
+	pipe that may be implemented if the need arises but it would mean that no
+	interactive command can be run in the pipe before ir.
+
+LINKING DIRECTORIES
+	if a directory is given in the file list, previously linked files in that
+	directory are removed and the directory is linked.
+
+	if you want sparesly populated directoried, don't pass directories, the 
+	examples above use '-type -f' to filter out directories.
+
+DEBUGING
+	set the IR_DEBUG environment variable to display some debuging information
+	
+		IR_DEBUG=1 ir [command]
+
+EOH
+
+set -e
+
+t=/tmp/$(mktemp -u ir_tmp_file_XXXXXX)
+[[ -n $IR_DEBUG ]] && echo ir: using file : $t
+
+if [[ -z $1 ]] ; then
+	[[ -n $IR_DEBUG ]] && echo ir: command : fzf -m 
+	fzf -m > $t
+	d=$(pwd)/
+else
+	[[ -n $IR_DEBUG ]] && echo ir: user command : $*
+	eval $* > $t
+fi
+
+td=$(mktemp -d -u ir_tmp_dir_XXXXXX)
+mkdir -p "/tmp/$td" &>/dev/null
+pushd "/tmp/$td" &>/dev/null
+[[ -n $IR_DEBUG ]] && printf "ir: tmp directory : %s\n" $(pwd)
+
+exec 3< $t
+while read f <&3 ; do
+	f=${f%/}
+
+	[[ -n $IR_DEBUG ]] && echo ir: mkdir -p \$\(dirname  "$f"\) 
+	dir=$(dirname  "$f") 
+	mkdir -p "./$dir" 
+
+	[[ -n $IR_DEBUG ]] && echo ir: ln -s "$d$f" "./$f" 
+	[[ -d "$f" && -e "./$f" ]] && rm -rf "./$f"
+	ln -s "$d$f" "./$f"
+done
+
+ranger
