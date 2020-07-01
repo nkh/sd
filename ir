@@ -1,79 +1,127 @@
 #!/bin/bash
 
-help=<<EOH
-NAME
-	ir - create a temporary file structure and run ranger 
-
-SYNOPSIS
-	ir [command]
-
-DESCRIPTION
-	ir runs a user defined command to generate a list of files. If no command
-	is given, ir runs 'fzf -m' in the current directory to select files.
-
-	ir creates links to all the files returned by the user command in a
-	temporary directory.
+help_text=\
+"NAME
+	ir - create a temporary file structure and run a viewer
 	
-	ranger is then run in that directory
-
+SYNOPSIS
+	ir
+	ir directory [directory ...]
+	non_interactive_commands_pipeline | ir
+	ir 'command'
+	
+DESCRIPTION
+	Given a list of files and directories, create a directory structure
+	in a temporary directory with links to the files and directories; ranger
+	(or another viewer) is then run in the temporary directory.
+	
+ARGUMENTS
+	With no arguments, ir runs 'fzf -m' to select files and directories.
+	
+	If given directories, 'fzf -m' is used to select from the directories.
+	
+	ir accepts the list of files on stdin, if you generate the file list
+	via a pipeline, make sure no interactive command is used (IE: fzf).
+	
+	A user command to generate a list of files can be given to ir; the
+	command can be interactive.
+	
 USER COMMAND
-	the user command is given as an argument (remember to quote the command
-	to avoid interpolation by the shell).
-
-	EG: ir 'find /home/directory/ -type f | fzf -m'
-
-	You can add a macro in your initrc to do the wrapping
-  	"\ei": '\C-b ir '\C-e'
+	The user command is given as an argument, quote the command to avoid
+	shell interpolation.
+	
+	E.G.: ir 'find /home/directory/ -type f | fzf -m'
+	
+	You can add a macro in your initrc to do the wrapping:
+		"\ei": '\C-a ir '\C-e'
 
 LINKING DIRECTORIES
-	if a directory is given in the file list, previously linked files in that
-	directory are removed and the directory is linked.
-
-	if you want sparesly populated directoried, don't pass directories, the 
-	examples above use '-type -f' to filter out directories.
-
-TODOS
-	ir doesn't accept piping a file list as ranger is an interactive commands
-	which can't be run in a pipe. There are some trick to run ir in a pipe 
-	that may be implemented if the needed.
-
-DEBUGING
-	set the IR_DEBUG environment variable to display some debuging information
+	If a directory is given in the file list, previously linked files in
+	that directory are removed and the directory is linked.
 	
-		IR_DEBUG=1 ir [command]
+	If you want sparsely populated directories, don't pass directories, the
+	examples above use '-type -f' to filter out directories.
+	
+OPTIONS
+	-h|--help	display this help text
+	-d|--debug	display debug information, temporary directory is kept
+	-v|--viewer=cmd	run the command after setting up the file structure
+	--no_viewer	only create the structure
+	-f|--flat	the files are linked to basename.dirname flattening the
+			directory structure
+	
+ENVIRONMENT VARIABLES
+	IR_DEBUG	see --debug
+	IR_VIEWER	see --viewer
+	IR_NO_VIEWER	see --no_viewer
+	IR_FLAT		see --flat"
 
-EOH
+while :; do
+	case $1 in
+		-h|--help)
+			echo "$help_text"
+			exit 0 ;;
+		-d|--debug)
+			IR_DEBUG=1 ;;
+		-v|--viewer)
+			IR_VIEWER=$2 ; : ${IR_VIEWER:=ranger} ; shift ;;
+		--no_viewer)
+			IR_NO_VIEWER=1 ;;
+		-f|--flat)
+			IR_FLAT=1 ;;
+		-?*)
+			printf 'ir: Error: Unknown option: %s\n' "$1" >&2
+			exit 1 ;;
+		*)
+			break
+	esac
+	shift
+done
 
 set -e
 
-t=/tmp/$(mktemp -u ir_tmp_file_XXXXXX)
-[[ -n $IR_DEBUG ]] && echo ir: using file : $t
+IR_VIEWER=${IR_VIEWER:-ranger}
 
-if [[ -z $1 ]] ; then
-	[[ -n $IR_DEBUG ]] && echo ir: command : fzf -m 
-	fzf -m > $t
+td=/tmp/$(mktemp -d -u ir_XXXXXXXX)
+mkdir -p "$td" &>/dev/null
+
+t=$td/.ir_input
+
+if [[ ! -t 0 ]] ; then
+	[[ -n $IR_DEBUG ]] && echo ir: redirecting stdin to file list: $t
+	cat > "$t"
+	echo >> "$t"
+elif [[ -z "$1" ]] ; then
+	[[ -n $IR_DEBUG ]] && echo ir: redirecting command "'fzf -m'" to file list: $t
+	fzf -m > "$t"
 	d=$(pwd)/
+elif [[ -d "$1" ]] ; then
+	find $* | fzf -m > "$t"
 else
-	[[ -n $IR_DEBUG ]] && echo ir: user command : $*
-	eval $* > $t
+	[[ -n $IR_DEBUG ]] && echo ir: redirecting command "'$*'" to file list: $t
+	eval $* > "$t"
 fi
 
-td=$(mktemp -d -u ir_tmp_dir_XXXXXX)
-mkdir -p "/tmp/$td" &>/dev/null
-cd "/tmp/$td" &>/dev/null
-[[ -n $IR_DEBUG ]] && printf "ir: tmp directory : %s\n" $(pwd)
-
 exec 3< $t
+
 while read f <&3 ; do
-	f=${f%/}
-
-	[[ -n $IR_DEBUG ]] && echo ir: mkdir -p \$\(dirname  "$f"\) 
-	dir=$(dirname  "$f") 
-	mkdir -p "./$dir" 
-
-	[[ -n $IR_DEBUG ]] && echo ir: ln -s "$d$f" "./$f" 
-	[[ -d "$f" && -e "./$f" ]] && rm -rf "./$f"
-	ln -s "$d$f" "./$f"
+	if [[ -n $f ]] ; then
+		
+		f=${f%/}
+		[[ -n $IR_DEBUG ]] && echo ir: linking "$d$f"
+		
+		[[ -d "$f" && -e "$td/$f" ]] && rm -rf "$td/$f"
+		
+		if [[ -z $IR_FLAT ]] ; then
+			mkdir -p "$td/"$(dirname  "$f")
+			ln -s "$d$f" "$td/$f"
+		else
+			destination="$td/"$(basename "$f").$(dirname "$f" | tr / _)
+			ln -s "$d$f" "$destination"
+		fi
+	fi
 done
 
-ranger
+[[ -z $IR_NO_VIEWER ]] && echo "$td" | parallel -X --tty "$IR_VIEWER"
+[[ -z $IR_DEBUG ]] && rm -rf "$td"
+
