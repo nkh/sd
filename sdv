@@ -1,0 +1,17 @@
+#!/bin/bash
+
+# helper for sd (shadow directory) utility
+# it lets you start an interactive command on the directory created by sd
+
+# it read the directory from stdin and the command from the arguments
+# the command must accept the directory as an argument
+# the directory is output again after the command is run so you can pass it
+# to another command
+
+# example sd | sdv ranger | do something_with_directory
+
+set -e 
+
+read d
+echo "$d" | parallel -X --tty "$*"
+echo "$d"

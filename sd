@@ -1,0 +1,139 @@
+#!/bin/bash
+
+help_text=\
+"NAME
+	sd - create a shadow file structure
+	
+SYNOPSIS
+	sd
+	sd directory [directory ...]
+	sd --dest directory directory [directory ...]
+	non_interactive_commands_pipeline | sd
+	sd 'command'
+	
+DESCRIPTION
+	Given a list of files and directories, create a directory structure
+	in a directory with links to the files and directories
+	
+RETURN
+	The directory where the shadowing was done. 
+
+ARGUMENTS
+	With no arguments, sd runs 'fzf -m' to select files and directories and
+	creates the file structure in a temporary directory.
+	
+	If --filter is set and the argument are directories, 'fzf -m' is used
+	to select from the directories.
+	
+	sd accepts the list of files on stdin, if you generate the file list
+	via a pipeline, make sure no interactive command is used (IE: not fzf).
+	
+	A user command to generate a list of files can be given to sd; the
+	command can be interactive.
+	
+USER COMMAND
+	The user command is given as an argument, quote the command to avoid
+	shell interpolation.
+	
+	E.G.: sd 'find /home/directory/ -type f | fzf -m'
+	
+	You can add a macro in your initrc to do the wrapping:
+		"\ei": '\C-a ir '\C-e'
+
+LINKING DIRECTORIES
+	If a directory is given in the file list, previously linked files in
+	that directory are removed and the directory is linked.
+	
+	If you want sparsely populated directories, don't pass directories, the
+	examples above use '-type -f' to filter out directories.
+	
+	Also check option --no_link.
+
+OPTIONS
+	-d|--destination	directory where files are shadowed
+	-k|--keep		don't remove the temporary directory
+	-f|--flat		the files are linked to basename.dirname flattening the
+				directory structure
+	--no_link		don't link file but create empty files
+	--filter		pass the input to 'fzf' for seletion
+
+	--debug			display debug information, temporary directory is kept
+	-h|--help		display this help text
+"
+
+while :; do
+	case $1 in
+		-d|--destination)
+			SD_DESTINATION=1 ;;
+		-f|--flat)
+			SD_FLAT=1 ;;
+		--no_link)
+			SD_NO_LINK=1 ;;
+		-k|--keep)
+			SD_KEEP=1 ;;
+
+		--FILTER)
+			SD_FILTER=1 ;;
+
+		-d|--debug)
+			SD_DEBUG=1 ;;
+
+		-h|--help)
+			echo "$help_text"
+			exit 0 ;;
+		-?*)
+			printf 'sd: Error: Unknown option: %s\n' "$1" >&2
+			exit 1 ;;
+		*)
+			break
+	esac
+	shift
+done
+
+set -e
+
+[[ -n "$SD_DESTINATION" ]] && td="$SD_DESTINATION" || td=/tmp/$(mktemp -d -u sd_XXXXXXXX) 
+[[ -d "$td" ]] &&  echo sd: directory "$td" exists >&2
+mkdir -p "$td" &>/dev/null
+
+t=$td/.sd_input
+
+if [[ ! -t 0 ]] ; then
+	[[ -n $SD_DEBUG ]] && echo sd: redirecting stdin to file list: $t >&2
+	cat > "$t"
+	echo >> "$t"
+elif [[ -z "$1" ]] ; then
+	[[ -n $SD_DEBUG ]] && echo sd: redirecting command "'fzf -m'" to file list: $t >&2
+	fzf -m > "$t"
+	d=$(pwd)/
+elif [[ -d "$1" ]] ; then
+	[[ -n $SD_DEBUG ]] && echo sd: redirecting command "'$*'" to file list: $t >&2
+	find $* | fzf -m > "$t"
+else
+	[[ -n $SD_DEBUG ]] && echo sd: redirecting command "'$*'" to file list: $t >&2
+	eval $* > "$t"
+fi
+
+exec 3< $t
+
+while read f <&3 ; do
+	if [[ -n $f ]] ; then
+		
+		f=${f%/}
+		[[ -n $SD_DEBUG ]] && echo sd: entry "$d$f" >&2
+		
+		[[ -d "$f" && -e "$td/$f" && -z $SD_NO_LINK ]] && rm -rf "$td/$f"
+		
+		if [[ -n $SD_FLAT ]] ; then
+			destination="$td/"$(basename "$f").$(dirname "$f" | tr / _)
+		else
+			mkdir -p "$td/"$(dirname  "$f")
+			destination="$td/$f"
+		fi
+
+		([[ -n $SD_NO_LINK ]] && touch "$destination") || ( $(ln -s "$d$f" "$destination") || true)
+	fi
+done
+
+echo "$td"
+
