@@ -13,8 +13,11 @@ SYNOPSIS
 DESCRIPTION
 	Given a list of files and directories, create a directory structure
 	in a temporary directory with links to the files and directories; ranger
-	(or another viewer) is then run in the temporary directory.
+	(or another viewer, ie: broot) is then run in the temporary directory.
 	
+	After viewing the directory is removed except if you have set --keep or
+	--debug
+
 ARGUMENTS
 	With no arguments, ir runs 'fzf -m' to select files and directories.
 	
@@ -49,12 +52,17 @@ OPTIONS
 	--no_viewer	only create the structure
 	-f|--flat	the files are linked to basename.dirname flattening the
 			directory structure
-	
+	--no_link	don't link file but create empty files
+	-k|--keep	don't remove the temporary directory
+
 ENVIRONMENT VARIABLES
 	IR_DEBUG	see --debug
 	IR_VIEWER	see --viewer
 	IR_NO_VIEWER	see --no_viewer
-	IR_FLAT		see --flat"
+	IR_FLAT		see --flat
+	IR_NO_LINK	see --no_link
+	IR_KEEP		see --keep
+"
 
 while :; do
 	case $1 in
@@ -69,6 +77,10 @@ while :; do
 			IR_NO_VIEWER=1 ;;
 		-f|--flat)
 			IR_FLAT=1 ;;
+		--no_link)
+			IR_NO_LINK=1 ;;
+		-k|--keep)
+			IR_KEEP=1 ;;
 		-?*)
 			printf 'ir: Error: Unknown option: %s\n' "$1" >&2
 			exit 1 ;;
@@ -101,8 +113,9 @@ else
 	[[ -n $IR_DEBUG ]] && echo ir: redirecting command "'$*'" to file list: $t
 	eval $* > "$t"
 fi
-
+#vi:tabs 32 56
 exec 3< $t
+#vi:tabs
 
 while read f <&3 ; do
 	if [[ -n $f ]] ; then
@@ -110,18 +123,18 @@ while read f <&3 ; do
 		f=${f%/}
 		[[ -n $IR_DEBUG ]] && echo ir: linking "$d$f"
 		
-		[[ -d "$f" && -e "$td/$f" ]] && rm -rf "$td/$f"
+		[[ -d "$f" && -e "$td/$f" && -z $IR_NO_LINK ]] && rm -rf "$td/$f"
 		
 		if [[ -z $IR_FLAT ]] ; then
 			mkdir -p "$td/"$(dirname  "$f")
-			ln -s "$d$f" "$td/$f"
+			[[ -z $IR_NO_LINK ]] && ln -s "$d$f" "$td/$f" || touch "$td/$f"
 		else
 			destination="$td/"$(basename "$f").$(dirname "$f" | tr / _)
-			ln -s "$d$f" "$destination"
+			[[ -z $IR_NO_LINK ]] && ln -s "$d$f" "$destination" || touch "$destination"
 		fi
 	fi
 done
 
 [[ -z $IR_NO_VIEWER ]] && echo "$td" | parallel -X --tty "$IR_VIEWER"
-[[ -z $IR_DEBUG ]] && rm -rf "$td"
+([[ -z $IR_DEBUG && -z $IR_KEEP ]] && rm -rf "$td" ) || echo "ir: temporary directory: $td"
 
