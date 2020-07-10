@@ -2,44 +2,42 @@
 
 help_text=\
 "NAME
-	sd - create a shadow file structure
+	sd - create a shadow directory structure
 	
 SYNOPSIS
 	sd
-	sd directory [directory ...]
-	sd --dest directory directory [directory ...]
-	non_interactive_commands_pipeline | sd
-	sd 'command'
+	sd [--filter] directory [directory ...]
+	interactive_commands | sd
+	non_interactive_command | sd [--filter]
+	sd 'possibly interactive command'
 	
 DESCRIPTION
 	Given a list of files and directories, create a directory structure
-	in a directory with links to the files and directories
+	in a temporary directory with links to the input files and directories.
 	
 RETURN
-	The directory where the shadowing was done. 
+	The directory where the shadowing was done. This lets you use the 
+	companion utility 'sdv' to start a program, possibly interactive, on
+	the created directory and 'sdrm' which removes the temporary directory.
+
+		I.E.: sd --filter ~/downloads/bikes | sdv ranger | sdrm
 
 ARGUMENTS
 	With no arguments, sd runs 'fzf -m' to select files and directories and
 	creates the file structure in a temporary directory.
 	
-	If --filter is set and the argument are directories, 'fzf -m' is used
-	to select from the directories.
+	If the argument are directories, 'find -type f' is used to generate the
+	file list; if --filter is given as option, find's output is filtered 
+	via 'fzf -m'.
 	
-	sd accepts the list of files on stdin, if you generate the file list
-	via a pipeline, make sure no interactive command is used (IE: not fzf).
+	sd also accepts the list of files on stdin, if you generate the file
+	list via a pipeline, make sure no interactive command is used.
 	
 	A user command to generate a list of files can be given to sd; the
-	command can be interactive.
+	command can be interactive, quote the command to avoid interpolation.
 	
-USER COMMAND
-	The user command is given as an argument, quote the command to avoid
-	shell interpolation.
+		E.G.: sd 'find /home/directory/ -type f | fzf -m'
 	
-	E.G.: sd 'find /home/directory/ -type f | fzf -m'
-	
-	You can add a macro in your initrc to do the wrapping:
-		"\ei": '\C-a ir '\C-e'
-
 LINKING DIRECTORIES
 	If a directory is given in the file list, previously linked files in
 	that directory are removed and the directory is linked.
@@ -50,14 +48,12 @@ LINKING DIRECTORIES
 	Also check option --no_link.
 
 OPTIONS
-	-d|--destination	directory where files are shadowed
-	-k|--keep		don't remove the temporary directory
-	-f|--flat		the files are linked to basename.dirname flattening the
-				directory structure
+	-d|--destination=s	destination directory, or one is created in /tmp
 	--no_link		don't link file but create empty files
-	--filter		pass the input to 'fzf' for seletion
+	--filter		pass the input to 'fzf -m' for seletion
+	-f|--flat		the files are linked to basename.dirname
 
-	--debug			display debug information, temporary directory is kept
+	--debug			display debug information
 	-h|--help		display this help text
 "
 
@@ -69,11 +65,9 @@ while :; do
 			SD_FLAT=1 ;;
 		--no_link)
 			SD_NO_LINK=1 ;;
-		-k|--keep)
-			SD_KEEP=1 ;;
 
-		--FILTER)
-			SD_FILTER=1 ;;
+		--filter)
+			SD_FILTER=" | fzf -m " ;;
 
 		-d|--debug)
 			SD_DEBUG=1 ;;
@@ -93,24 +87,25 @@ done
 set -e
 
 [[ -n "$SD_DESTINATION" ]] && td="$SD_DESTINATION" || td=/tmp/$(mktemp -d -u sd_XXXXXXXX) 
+[[ -n $SD_DEBUG ]] &&  echo sd: directory: "$td">&2
 [[ -d "$td" ]] &&  echo sd: directory "$td" exists >&2
 mkdir -p "$td" &>/dev/null
 
 t=$td/.sd_input
 
 if [[ ! -t 0 ]] ; then
-	[[ -n $SD_DEBUG ]] && echo sd: redirecting stdin to file list: $t >&2
-	cat > "$t"
+	[[ -n $SD_DEBUG ]] && echo sd: using stdin >&2
+	eval cat $SD_FILTER > "$t"
 	echo >> "$t"
 elif [[ -z "$1" ]] ; then
-	[[ -n $SD_DEBUG ]] && echo sd: redirecting command "'fzf -m'" to file list: $t >&2
+	[[ -n $SD_DEBUG ]] && echo sd: using command \"fzf -m\" >&2
 	fzf -m > "$t"
 	d=$(pwd)/
 elif [[ -d "$1" ]] ; then
-	[[ -n $SD_DEBUG ]] && echo sd: redirecting command "'$*'" to file list: $t >&2
-	find $* | fzf -m > "$t"
+	[[ -n $SD_DEBUG ]] && echo sd: using command \"find $*\" >&2
+	eval find $* -type f $SD_FILTER > "$t"
 else
-	[[ -n $SD_DEBUG ]] && echo sd: redirecting command "'$*'" to file list: $t >&2
+	[[ -n $SD_DEBUG ]] && echo sd: using command \"$*\" >&2
 	eval $* > "$t"
 fi
 
@@ -130,7 +125,7 @@ while read f <&3 ; do
 			mkdir -p "$td/"$(dirname  "$f")
 			destination="$td/$f"
 		fi
-
+		
 		([[ -n $SD_NO_LINK ]] && touch "$destination") || ( $(ln -s "$d$f" "$destination") || true)
 	fi
 done
