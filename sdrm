@@ -1,0 +1,4 @@
+# remove a directory but only if it's in /tmp and starts with sd_
+
+read d
+[[ "/tmp/sd_" == ${d:0:8} ]] && rm -rf "$d" 

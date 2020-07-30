@@ -50,8 +50,8 @@ LINKING DIRECTORIES
 OPTIONS
 	-d|--destination=s	destination directory, or one is created in /tmp
 	--no_link		don't link file but create empty files
-	--filter		pass the input to 'fzf -m' for seletion
-	-f|--flat		the files are linked to basename.dirname
+	-f|--filter		pass the input to 'fzf -m' for seletion
+	--flat		the files are linked to basename.dirname
 
 	--debug			display debug information
 	-h|--help		display this help text
@@ -61,12 +61,12 @@ while :; do
 	case $1 in
 		-d|--destination)
 			SD_DESTINATION=1 ;;
-		-f|--flat)
+		--flat)
 			SD_FLAT=1 ;;
 		--no_link)
 			SD_NO_LINK=1 ;;
 
-		--filter)
+		-f|--filter)
 			SD_FILTER=" | fzf -m " ;;
 
 		-d|--debug)
